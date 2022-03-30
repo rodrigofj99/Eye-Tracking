@@ -17,7 +17,7 @@
 #include <mutex>
 #include <condition_variable>
 
-#include <magnification.h>
+
 
 // Global Variables:
 HINSTANCE hInstance;
@@ -38,7 +38,8 @@ bool is_safe = true;
 // Forward declarations of functions included in this code module:
 LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
 void url_receiver(char const* url, void* user_data);
-void gaze_point_callback(tobii_gaze_point_t const* gaze_point, void* /* user_data*/);
+void gaze_point_callback(tobii_gaze_point_t const* gaze_point, void* user_data);
+void head_pose_callback(tobii_head_pose_t const* head_pose, void* user_data);
 DWORD WINAPI  tobii(_In_ LPVOID lpParameter);
 void Initialization();
 
@@ -54,13 +55,16 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     RegisterClass(&wc);
 
 
-    DWORD tobiiID;
+    /*DWORD tobiiID;
     HANDLE hTobii = CreateThread(NULL, 0, tobii, NULL, 0, &tobiiID);
-    assert(hTobii != 0);
+    assert(hTobii != 0);*/
     
+    std::thread hTobii(tobii, nullptr);
+
     Initialization();
 
-    CloseHandle(hTobii);
+    //CloseHandle(hTobii);
+    hTobii.join();
     
     return 0;
 
@@ -135,12 +139,12 @@ DWORD WINAPI  tobii(_In_ LPVOID lpParameter)
         }
         else
         {
-            result = tobii_gaze_point_subscribe(device, gaze_point_callback, 0);
+            // Subscribe to head pose data
+            result = tobii_head_pose_subscribe(device, head_pose_callback, 0);
             assert(result == TOBII_ERROR_NO_ERROR);
         }
 
-
-        for (int i = 0; i <= 100; i++)
+        for (int i = 0; i <= 1000; i++)
         {
             // Optionally block this thread until data is available.
             result = tobii_wait_for_callbacks(1, &device);
@@ -150,6 +154,7 @@ DWORD WINAPI  tobii(_In_ LPVOID lpParameter)
             result = tobii_device_process_callbacks(device);
             assert(result == TOBII_ERROR_NO_ERROR);
         }
+
         if (!is_zoom)
         {
             result = tobii_gaze_point_unsubscribe(device);
@@ -157,7 +162,7 @@ DWORD WINAPI  tobii(_In_ LPVOID lpParameter)
         }
         else
         {
-            result = tobii_gaze_point_unsubscribe(device);
+            result = tobii_head_pose_unsubscribe(device);
             assert(result == TOBII_ERROR_NO_ERROR);
         }        
     }
@@ -176,7 +181,7 @@ void gaze_point_callback(tobii_gaze_point_t const* gaze_point, void* data)
     // Check that the data is valid before using it
     if (gaze_point->validity == TOBII_VALIDITY_VALID)
     {
-        //myfile << std::to_string(gaze_point->position_xy[0]) + "," + std::to_string(gaze_point->position_xy[1]) + "\n";
+        myfile << std::to_string(gaze_point->position_xy[0]) + "," + std::to_string(gaze_point->position_xy[1]) + "\n";
     }
 }
 
@@ -188,27 +193,23 @@ void url_receiver(char const* url, void* user_data)
     if (strlen(url) < 256)  strcpy_s(buffer, 256, url);
 }
 
-
-
-
-
-BOOL SetZoom(float magnificationFactor)
+void head_pose_callback(tobii_head_pose_t const* head_pose, void* user_data)
 {
-    // A magnification factor less than 1.0 is not valid.
-    if (magnificationFactor < 1.0)
+    if (head_pose->position_validity == TOBII_VALIDITY_VALID)
     {
-        return FALSE;
+        myfile << std::to_string(head_pose->position_xyz[0]) + "," + std::to_string(head_pose->position_xyz[1]) +
+                                                        "," + std::to_string(head_pose->position_xyz[2]) + ",";
     }
 
-    // Calculate offsets such that the center of the magnified screen content 
-    // is at the center of the screen. The offsets are relative to the 
-    // unmagnified screen content.
-    int xDlg = (int)((float)GetSystemMetrics(
-        SM_CXSCREEN) * (1.0 - (1.0 / magnificationFactor)) / 2.0);
-    int yDlg = (int)((float)GetSystemMetrics(
-        SM_CYSCREEN) * (1.0 - (1.0 / magnificationFactor)) / 2.0);
-
-    return MagSetFullscreenTransform(magnificationFactor, xDlg, yDlg);
+    for (int i = 0; i < 3; ++i)
+    {
+        if (head_pose->rotation_validity_xyz[i] == TOBII_VALIDITY_VALID)
+            myfile << std::to_string(head_pose->rotation_xyz[i]);
+        if (i != 2)
+            myfile << ",";
+        else
+            myfile << "\n";
+    }
 }
 
 
@@ -250,9 +251,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                  {
                      if (scroll == 1)
                      {
-                         //myfile.open("Outputs/scroll_up.csv");
-                         //assert(myfile.is_open() == true);
-                         //myfile << "x,y\n";
+                         myfile.open("Outputs/scroll_up.csv");
+                         assert(myfile.is_open() == true);
+                         myfile << "x,y\n";
 
                          //Top section
                          FillRect(hdc, &ps.rcPaint, (HBRUSH)(COLOR_WINDOW + 1));
@@ -261,9 +262,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                      }
                      else if (scroll == -1)
                      {
-                         //myfile.open("Outputs/scroll_down.csv");
-                         //assert(myfile.is_open() == true);
-                         //myfile << "x,y\n";
+                         myfile.open("Outputs/scroll_down.csv");
+                         assert(myfile.is_open() == true);
+                         myfile << "x,y\n";
 
                          //Botton section
                          FillRect(hdc, &ps.rcPaint, (HBRUSH)(COLOR_WINDOW + 1));
@@ -273,9 +274,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                      }
                      else
                      {
-                         //myfile.open("Outputs/no_scroll.csv");
-                         //assert(myfile.is_open() == true);
-                         //myfile << "x,y\n";
+                         myfile.open("Outputs/no_scroll.csv");
+                         assert(myfile.is_open() == true);
+                         myfile << "x,y\n";
 
                          //Middle section
                          FillRect(hdc, &ps.rcPaint, (HBRUSH)(COLOR_WINDOW + 1));
@@ -291,31 +292,23 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
                      if (is_positive)
                      {
-                         //myfile.open("Outputs/zoom_in.csv");
-                         //assert(myfile.is_open() == true);
-                         //myfile << "x,y\n"; //CHANGEEEEE
+                         myfile.open("Outputs/zoom_in.csv");
+                         assert(myfile.is_open() == true);
+                         myfile << "Pos x, Pos y, Pos y, Rot x, Rot y, Rot z \n";
 
                          FillRect(hdc, &ps.rcPaint, (HBRUSH)(COLOR_HOTLIGHT + 1));
                      }
                      else
                      {
-                         //myfile.open("Outputs/no_zoom.csv");
-                         //assert(myfile.is_open() == true);
-                         //myfile << "x,y\n"; //CHANGEEEE
+                         myfile.open("Outputs/no_zoom.csv");
+                         assert(myfile.is_open() == true);
+                         myfile << "Pos x, Pos y, Pos y, Rot x, Rot y, Rot z \n";
 
                          FillRect(hdc, &ps.rcPaint, (HBRUSH)(COLOR_WINDOW + 1));
                      }
                  }
              }
-            EndPaint(hWnd, &ps);
-            
-            /*MagInitialize();
-            std::this_thread::sleep_for(std::chrono::seconds(2));
-            SetZoom(3);
-            std::this_thread::sleep_for(std::chrono::seconds(6));
-            SetZoom(1);
-            MagUninitialize();*/
-                        
+            EndPaint(hWnd, &ps);                     
             return 0;
 
         case WM_DESTROY:

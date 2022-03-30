@@ -1,4 +1,4 @@
 ﻿  main.cpp
-C:\Users\Rodrigo\Documents\KU Classes\Spring 2022\math_882\Final project\Calibration\main.cpp(277,44): warning C4244: '/=': conversion from 'double' to 'LONG', possible loss of data
-C:\Users\Rodrigo\Documents\KU Classes\Spring 2022\math_882\Final project\Calibration\main.cpp(288,47): warning C4244: '/=': conversion from 'double' to 'LONG', possible loss of data
+C:\Users\Rodrigo\Documents\KU Classes\Spring 2022\math_882\Final project\Calibration\main.cpp(272,44): warning C4244: '/=': conversion from 'double' to 'LONG', possible loss of data
+C:\Users\Rodrigo\Documents\KU Classes\Spring 2022\math_882\Final project\Calibration\main.cpp(283,47): warning C4244: '/=': conversion from 'double' to 'LONG', possible loss of data
   Scroll.vcxproj -> C:\Users\Rodrigo\Documents\KU Classes\Spring 2022\math_882\Final project\Calibration\x64\Debug\Calibration.exe
