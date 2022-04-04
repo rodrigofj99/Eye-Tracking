@@ -27,13 +27,13 @@ WNDCLASS wc = { };
 std::ofstream myfile;
 bool is_positive = true;
 bool is_zoom = false;
-int scroll;
+int scroll = 100;
 bool scroll_message = true;
 
 
 std::mutex m;
 std::condition_variable cv;
-bool is_safe = true;
+bool is_safe = false;
 
 // Forward declarations of functions included in this code module:
 LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
@@ -90,6 +90,7 @@ void Initialization()
 
 DWORD WINAPI  tobii(_In_ LPVOID lpParameter)
 {   
+    std::this_thread::sleep_for(std::chrono::seconds(3)); // Temporary thread sync
     // Create API
     tobii_api_t* api = NULL;
     tobii_error_t result = tobii_api_create(&api, NULL, NULL);
@@ -110,13 +111,13 @@ DWORD WINAPI  tobii(_In_ LPVOID lpParameter)
     result = tobii_device_create(api, url, TOBII_FIELD_OF_USE_INTERACTIVE, &device);
     assert(result == TOBII_ERROR_NO_ERROR);
 
-    //std::unique_lock<std::mutex> lk(m);
-    //cv.wait(lk, [] {return !is_safe; }); // negate it?*/
+    /*std::unique_lock<std::mutex> lk(m);
+    cv.wait(lk, [] {return !is_safe; }); // negate it?
     //Update window to display initial message
-    //InvalidateRect(hWnd, NULL, TRUE);
-    //UpdateWindow(hWnd);
-    //lk.unlock();
-    //cv.notify_all();
+    InvalidateRect(hWnd, NULL, TRUE);
+    UpdateWindow(hWnd);
+    lk.unlock();
+    cv.notify_all();*/
 
     for (int i = 0; i < 5; i++)
     {
@@ -127,6 +128,7 @@ DWORD WINAPI  tobii(_In_ LPVOID lpParameter)
         else is_positive = false;
 
         if (myfile.is_open()) myfile.close();
+        is_safe = false;
         
         InvalidateRect(hWnd, NULL, TRUE);
         UpdateWindow(hWnd);
@@ -164,7 +166,8 @@ DWORD WINAPI  tobii(_In_ LPVOID lpParameter)
         {
             result = tobii_head_pose_unsubscribe(device);
             assert(result == TOBII_ERROR_NO_ERROR);
-        }        
+        }  
+
     }
 
     result = tobii_device_destroy(device);
@@ -179,7 +182,7 @@ DWORD WINAPI  tobii(_In_ LPVOID lpParameter)
 void gaze_point_callback(tobii_gaze_point_t const* gaze_point, void* data)
 {
     // Check that the data is valid before using it
-    if (gaze_point->validity == TOBII_VALIDITY_VALID)
+    if (gaze_point->validity == TOBII_VALIDITY_VALID && is_safe==true)
     {
         myfile << std::to_string(gaze_point->position_xy[0]) + "," + std::to_string(gaze_point->position_xy[1]) + "\n";
     }
@@ -195,7 +198,7 @@ void url_receiver(char const* url, void* user_data)
 
 void head_pose_callback(tobii_head_pose_t const* head_pose, void* user_data)
 {
-    if (head_pose->position_validity == TOBII_VALIDITY_VALID)
+    if (head_pose->position_validity == TOBII_VALIDITY_VALID && is_safe == true)
     {
         myfile << std::to_string(head_pose->position_xyz[0]) + "," + std::to_string(head_pose->position_xyz[1]) +
                                                         "," + std::to_string(head_pose->position_xyz[2]) + ",";
@@ -203,12 +206,14 @@ void head_pose_callback(tobii_head_pose_t const* head_pose, void* user_data)
 
     for (int i = 0; i < 3; ++i)
     {
-        if (head_pose->rotation_validity_xyz[i] == TOBII_VALIDITY_VALID)
+        if (head_pose->rotation_validity_xyz[i] == TOBII_VALIDITY_VALID && is_safe == true)
+        {
             myfile << std::to_string(head_pose->rotation_xyz[i]);
-        if (i != 2)
-            myfile << ",";
-        else
-            myfile << "\n";
+            if (i != 2)
+                myfile << ",";
+            else
+                myfile << "\n";
+        }
     }
 }
 
@@ -227,21 +232,22 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     switch (message)
     {
          case WM_PAINT:
+         {
              hdc = BeginPaint(hWnd, &ps);
 
              //Explanation to user
-             if (scroll_message) //TODO: Fix this!!
+             /*if (scroll_message) //TODO: Fix this!!
              {
-                 //std::lock_guard<std::mutex> lk(m);
+                 std::lock_guard<std::mutex> lk(m);
                  //SetTextColor(hdc, 0x00FFFFFF);
                  //SetBkColor(hdc, 0x00000000);
                  DrawText(hdc, TEXT("Look around the painted section of the screen"), -1, &clientRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-                 //std::this_thread::sleep_for(std::chrono::seconds(2));
+                 std::this_thread::sleep_for(std::chrono::seconds(2));
                  scroll_message = false;
                  is_safe = true;
-                 //cv.notify_all();
+                 cv.notify_all();
              }
-             else
+             else*/
              {
 
                  FillRect(hdc, &ps.rcPaint, (HBRUSH)(COLOR_WINDOW + 1));
@@ -254,6 +260,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                          myfile.open("Outputs/scroll_up.csv");
                          assert(myfile.is_open() == true);
                          myfile << "x,y\n";
+                         is_safe = true;
 
                          //Top section
                          FillRect(hdc, &ps.rcPaint, (HBRUSH)(COLOR_WINDOW + 1));
@@ -265,6 +272,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                          myfile.open("Outputs/scroll_down.csv");
                          assert(myfile.is_open() == true);
                          myfile << "x,y\n";
+                         is_safe = true;
 
                          //Botton section
                          FillRect(hdc, &ps.rcPaint, (HBRUSH)(COLOR_WINDOW + 1));
@@ -272,11 +280,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                          ps.rcPaint.top /= 1.7;
                          FillRect(hdc, &ps.rcPaint, (HBRUSH)(COLOR_HOTLIGHT + 1));
                      }
-                     else
+                     else if (scroll == 0)
                      {
                          myfile.open("Outputs/no_scroll.csv");
                          assert(myfile.is_open() == true);
                          myfile << "x,y\n";
+                         is_safe = true;
 
                          //Middle section
                          FillRect(hdc, &ps.rcPaint, (HBRUSH)(COLOR_WINDOW + 1));
@@ -284,6 +293,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                          ps.rcPaint.top = ps.rcPaint.bottom;
                          ps.rcPaint.top /= 2;
                          FillRect(hdc, &ps.rcPaint, (HBRUSH)(COLOR_HOTLIGHT + 1));
+                     }
+                     else
+                     {
+                         FillRect(hdc, &ps.rcPaint, (HBRUSH)(COLOR_WINDOW + 1));
                      }
                  }
                  else
@@ -294,7 +307,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                      {
                          myfile.open("Outputs/zoom_in.csv");
                          assert(myfile.is_open() == true);
-                         myfile << "Pos x, Pos y, Pos y, Rot x, Rot y, Rot z \n";
+                         myfile << "Pos x,Pos y,Pos z,Rot x,Rot y,Rot z\n";
+                         is_safe = true;
 
                          FillRect(hdc, &ps.rcPaint, (HBRUSH)(COLOR_HOTLIGHT + 1));
                      }
@@ -302,14 +316,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                      {
                          myfile.open("Outputs/no_zoom.csv");
                          assert(myfile.is_open() == true);
-                         myfile << "Pos x, Pos y, Pos y, Rot x, Rot y, Rot z \n";
+                         myfile << "Pos x,Pos y,Pos z,Rot x,Rot y,Rot z\n";
+                         is_safe = true;
 
                          FillRect(hdc, &ps.rcPaint, (HBRUSH)(COLOR_WINDOW + 1));
                      }
                  }
              }
-            EndPaint(hWnd, &ps);                     
-            return 0;
+             EndPaint(hWnd, &ps);
+             is_safe = true;
+             return 0;
+         }
 
         case WM_DESTROY:
             PostQuitMessage(0);
