@@ -90,11 +90,11 @@ for i in range(df_zoom["Pos z"].size):
 
 df_zoom_correlation = df_zoom.corr()
 #sns.heatmap(df_zoom_correlation, annot=True, ax=ax[1,2])
-sns.heatmap(df_zoom_correlation, annot=True)#, ax=ax1)
+#sns.heatmap(df_zoom_correlation, annot=True)#, ax=ax1)
 
 df_zoom.describe()
-sns.pairplot(df_zoom)
-sns.boxplot(data=df_zoom)
+#sns.pairplot(df_zoom)
+#sns.boxplot(data=df_zoom)
 
 
 #### Training of ML models ####
@@ -114,27 +114,27 @@ X_train, X_test, y_train, y_test = train_test_split(df_zoom, y_zoom, test_size=0
 svm_zoom = svm.SVC(kernel='linear')
 svm_zoom.fit(X_train, y_train)
 y_pred = svm_zoom.predict(X_test)
-print("Accuracy for zooming with all features:",svm_zoom.score(X_test, y_test))
+print("Accuracy for zooming with all features: %.64f" % svm_zoom.score(X_test, y_test))
 
 
 importance = np.abs(svm_zoom.coef_).flatten()
 feature_names = np.array(df_zoom.columns)
-'''
+
 plt.bar(height=importance, x=feature_names)
 #ax[0,3].bar(height=importance, x=feature_names)
 
 plt.title("Feature importances via coefficients")
 #ax2.title("Feature importances via coefficients")
-'''
+
 sfs_forward = SequentialFeatureSelector(
-    svm_zoom, n_features_to_select=2, direction="forward", cv=5, n_jobs=-1, #5-fold cross-validation and running in parallel
+    svm_zoom, n_features_to_select=2, direction="forward", cv=7, n_jobs=-1, #5-fold cross-validation and running in parallel
 ).fit(df_zoom, y_zoom)
 
 sfs_backward = SequentialFeatureSelector(
-    svm_zoom, n_features_to_select=2, direction="backward", cv=5, n_jobs=-1,
+    svm_zoom, n_features_to_select=2, direction="backward", cv=7, n_jobs=-1,
 ).fit(df_zoom, y_zoom)
 
-rfecv = RFECV(svm_zoom, min_features_to_select=2, cv=5, n_jobs=-1).fit(df_zoom, y_zoom)
+rfecv = RFECV(svm_zoom, min_features_to_select=2, cv=7, n_jobs=-1).fit(df_zoom, y_zoom)
 
 print(
     "Features selected by forward sequential selection: "
@@ -155,19 +155,19 @@ X_train, X_test, y_train, y_test = train_test_split(df_zoom[['Pos z']], y_zoom, 
 svm_zoom = svm.SVC(kernel='linear')
 svm_zoom.fit(X_train, y_train)
 y_pred = svm_zoom.predict(X_test)
-print("Accuracy for zooming with one feature:",svm_zoom.score(X_test, y_test))
+print("Accuracy for zooming with one feature: %.64f" % svm_zoom.score(X_test, y_test))
 
-X_train, X_test, y_train, y_test = train_test_split(df_zoom[['Pos z', 'Pos x']], y_zoom, test_size=0.33, random_state=42, shuffle=True)
+X_train, X_test, y_train, y_test = train_test_split(df_zoom[['Pos z', 'Pos y']], y_zoom, test_size=0.33, random_state=42, shuffle=True)
 svm_zoom = svm.SVC(kernel='linear')
 svm_zoom.fit(X_train, y_train)
 y_pred = svm_zoom.predict(X_test)
-print("Accuracy for zooming with two features:",svm_zoom.score(X_test, y_test))
+print("Accuracy for zooming with two features: %.64f" % svm_zoom.score(X_test, y_test))
 
-X_train, X_test, y_train, y_test = train_test_split(df_zoom[['Pos z', 'Pos x', 'Rot z']], y_zoom, test_size=0.33, random_state=42, shuffle=True)
+X_train, X_test, y_train, y_test = train_test_split(df_zoom[['Pos z', 'Pos y', 'Rot x']], y_zoom, test_size=0.33, random_state=42, shuffle=True)
 svm_zoom = svm.SVC(kernel='linear')
 svm_zoom.fit(X_train, y_train)
 y_pred = svm_zoom.predict(X_test)
-print("Accuracy for zooming with three features:",svm_zoom.score(X_test, y_test))
+print("Accuracy for zooming with three features: %.64f" % svm_zoom.score(X_test, y_test))
 
 
 
@@ -207,4 +207,4 @@ for i in range(3):
     parameters.writelines(L)
 parameters.close()
 
-#plt.show()
+plt.show()

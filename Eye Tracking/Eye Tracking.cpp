@@ -19,7 +19,9 @@
 #include <magnification.h>
 #include "framework.h"
 #include "Eye Tracking.h"
-
+#include <mutex>
+#include <condition_variable>
+#include <math.h>
 
 
 // Global Variables:
@@ -30,19 +32,26 @@ HWND hWnd;                                      // main window handle
 std::ifstream parameters;                       //to read from output of SVM
 std::string coord;                              //tmp variable
 
-struct GlobalInfo {                             // for the working environment
-    //POINT gaze;
-    float gaze_x;
-    float gaze_y;
-    bool working;
-    //headpose
+double epsilon = pow(10, -3);
+std::mutex m;
+std::condition_variable cv;
 
+struct GlobalInfo {                             // for the working environment
+    float old_gaze_y = 0;
+    float gaze_y = 0;
+    float old_gaze_x = 0;
+    float gaze_x = 0;
+    float head_z = 0;
+    bool working = true;
+    bool safe = true;
 }Info;
 
 struct SVM_param {
     double w[2];
     double b;
-}SVM;
+    double mean[2];
+    double std[2];
+}svm_down, svm_up, svm_zoom;
 
 
 
@@ -76,30 +85,25 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     LoadStringW(hInstance, IDC_EYETRACKING, szWindowClass, MAX_LOADSTRING);
     MyRegisterClass(hInstance);
 
+    Info = {};
 
-    DWORD tobiiID;
-    DWORD scrollID;
-    //DWORD zoomID;
-    Info.working = true;
+    std::thread hTobii(tobii, &Info);
+    std::thread hScroll(scroll, &Info);
+    //std::thread hZoom(zoom, &Info);
 
-    HANDLE hTobii = CreateThread(NULL, 0, tobii, &Info, 0, &tobiiID);
-    assert(hTobii != NULL);
-    HANDLE hScroll = CreateThread(NULL, 0, scroll, &Info, 0, &scrollID);
-    assert(hScroll != NULL);
-    //HANDLE hZoom = CreateThread(NULL, 0, zoom, &global, 0, &zoomID);
-
-
-    /*/ Perform application initialization:
-    if (!InitInstance (hInstance, nCmdShow))
+    // Perform application initialization:
+    //if (!InitInstance (hInstance, nCmdShow))
     {
-        return FALSE;
+        //return FALSE;
     }
 
-    HACCEL hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_EYETRACKING));
+    //HACCEL hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_WINDOWSPROJECT1));
 
-    MSG msg;
+    //MSG msg;
 
-    // Main message loop:
+    Parameter_parsing();
+
+    /*/ Main message loop:
     while (GetMessage(&msg, nullptr, 0, 0))
     {
         if (!TranslateAccelerator(msg.hwnd, hAccelTable, &msg))
@@ -109,21 +113,15 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         }
     }
 
-    return (int) msg.wParam;*/
-
-
-    Parameter_parsing();
+    return (int) msg.wParam;//*/
 
 
     MessageBox(NULL, L"Click to quit", L"Click to quit", MB_OK);
     Info.working = FALSE;
 
-    bool close = CloseHandle(hTobii);
-    assert(close != 0);
-    close = CloseHandle(hScroll);
-    assert(close != 0);
-    //close = CloseHandle(hZoom);
-    //assert(close != 0);
+    hTobii.join();
+    hScroll.join();
+    //hZoom.join();
 
     return 0;
 }
@@ -134,12 +132,57 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 void Parameter_parsing()
 {
     parameters.open("../Calibration/Outputs/parameters.txt");
-    parameters >> coord;
-    SVM.w[0] = std::atof(coord.c_str());
-    parameters >> coord;
-    SVM.w[1] = std::atof(coord.c_str());
-    parameters >> coord;
-    SVM.b = std::atof(coord.c_str());
+    if (parameters.is_open())
+    {
+        try
+        {
+            parameters >> coord;
+            svm_down.w[0] = std::atof(coord.c_str());
+            parameters >> coord;
+            svm_down.w[1] = std::atof(coord.c_str());
+            parameters >> coord;
+            svm_down.b = std::atof(coord.c_str());
+            parameters >> coord;
+            svm_down.mean[0] = std::atof(coord.c_str());
+            parameters >> coord;
+            svm_down.mean[1] = std::atof(coord.c_str());
+            parameters >> coord;
+            svm_down.std[0] = std::atof(coord.c_str());
+            parameters >> coord;
+            svm_down.std[1] = std::atof(coord.c_str());
+
+            parameters >> coord;
+            svm_up.w[0] = std::atof(coord.c_str());
+            parameters >> coord;
+            svm_up.w[1] = std::atof(coord.c_str());
+            parameters >> coord;
+            svm_up.b = std::atof(coord.c_str());
+            parameters >> coord;
+            svm_up.mean[0] = std::atof(coord.c_str());
+            parameters >> coord;
+            svm_up.mean[1] = std::atof(coord.c_str());
+            parameters >> coord;
+            svm_up.std[0] = std::atof(coord.c_str());
+            parameters >> coord;
+            svm_up.std[1] = std::atof(coord.c_str());
+
+
+            parameters >> coord;
+            svm_zoom.w[0] = std::atof(coord.c_str());
+            parameters >> coord;
+            svm_zoom.b = std::atof(coord.c_str());
+            parameters >> coord;
+            svm_zoom.mean[0] = std::atof(coord.c_str());
+            parameters >> coord;
+            svm_zoom.std[0] = std::atof(coord.c_str());
+
+            parameters.close();
+        }
+        catch (...)
+        {
+            exit(15);
+        }
+    }
 }
 
 
@@ -203,8 +246,20 @@ void gaze_point_callback(tobii_gaze_point_t const* gaze_point, void* data)
     if (gaze_point->validity == TOBII_VALIDITY_VALID)
     {
         GlobalInfo* info = reinterpret_cast<GlobalInfo*>(data);
-        info->gaze_x = gaze_point->position_xy[0];
-        info->gaze_y = gaze_point->position_xy[1];
+        if (info->old_gaze_x == 0 && info->old_gaze_y == 0)
+        {
+            info->old_gaze_x = gaze_point->position_xy[0];
+            info->gaze_x = gaze_point->position_xy[0];
+            info->old_gaze_y = gaze_point->position_xy[1];
+            info->gaze_y = gaze_point->position_xy[1];
+        }
+        else
+        {
+            info->old_gaze_x = info->gaze_x;
+            info->gaze_x = gaze_point->position_xy[0];
+            info->old_gaze_y = info->gaze_y;
+            info->gaze_y = gaze_point->position_xy[1];
+        }
     }
 }
 
@@ -227,40 +282,57 @@ DWORD WINAPI  scroll(_In_ LPVOID lpParameter)
 {
     GlobalInfo* info = reinterpret_cast<GlobalInfo*>(lpParameter);
     HWND hCurrentWind;
-    int time_to_read = 200000000; //preliminary (0.2 sec)
+    POINT client_down;
+    POINT client_up;
+
+    int time_to_read = 200; // (0.2 sec)
     int line = 40; //maybe depends on screen?
-    //double down = 0.8; //preliminary
-    //double up = 0.2; //preliminary
 
     while (info->working)
     {
+        //Screen-to-client-area conversion
         hCurrentWind = GetForegroundWindow();
+        client_down.x = static_cast<LONG>(svm_down.w[0] * GetSystemMetrics(SM_CXSCREEN));
+        client_down.y = static_cast<LONG>(svm_down.w[1] * GetSystemMetrics(SM_CYSCREEN));
+        client_up.x = static_cast<LONG>(svm_up.w[0] * GetSystemMetrics(SM_CXSCREEN));
+        client_up.y = static_cast<LONG>(svm_up.w[1] * GetSystemMetrics(SM_CYSCREEN));
 
-        //Need a transformation to denormalize
-        //ScreenToClient(hCurrentWind, &info->gaze);
+        ScreenToClient(hCurrentWind, &client_down);
+        ScreenToClient(hCurrentWind, &client_up);
 
-        if (info->gaze_x * SVM.w[0] + info->gaze_y * SVM.w[1] + SVM.b > 0)
+        client_down.x /= GetSystemMetrics(SM_CXSCREEN);
+        client_down.y /= GetSystemMetrics(SM_CYSCREEN);
+        client_up.x /= GetSystemMetrics(SM_CXSCREEN);
+        client_up.y /= GetSystemMetrics(SM_CYSCREEN);
+
+        double x_down = (info->gaze_x - svm_down.mean[0]) / svm_down.std[0];
+        double y_down = (info->gaze_y - svm_down.mean[1]) / svm_down.std[1];
+        double x_up = (info->gaze_x - svm_up.mean[0]) / svm_up.std[0];
+        double y_up = (info->gaze_y - svm_up.mean[1]) / svm_up.std[1];
+
+        if (x_down * client_down.x + y_down * client_down.y + svm_down.b > 0)
         {
+            //std::unique_lock<std::mutex> lk(m);
+            //cv.wait(lk, [&] {return !info->safe; });
+
             mouse_event(MOUSEEVENTF_WHEEL, 0, 0, -1 * line, 0); //Not the best, but works for now
-            std::this_thread::sleep_for(std::chrono::nanoseconds(time_to_read));
+            std::this_thread::sleep_for(std::chrono::milliseconds(time_to_read));
+
+            //lk.unlock();
+            //cv.notify_all();
         }
 
-        //PREVIOUS METHOD
-        /*if (info->gaze_y >= down)
+        if (x_up * client_up.x + y_up * client_up.y + svm_up.b > 0)
         {
-            mouse_event(MOUSEEVENTF_WHEEL, 0, 0, -1 * line, 0); //Not the best, but works for now
-            std::this_thread::sleep_for(std::chrono::nanoseconds(time_to_read));
-            //if ((GetWindowLongW(wind, GWL_STYLE) and WS_VSCROLL))
-            {
-                //bool result = PostMessageW(wind, WM_VSCROLL, MAKEWPARAM(SB_LINEDOWN, NULL), 0);
-                //if (!result) exit(0);
-            }
-        }
-        else if (info->gaze_y <= up)
-        {
+            //std::unique_lock<std::mutex> lk(m);
+            //cv.wait(lk, [&] {return !info->safe; });
+
             mouse_event(MOUSEEVENTF_WHEEL, 0, 0, 1 * line, 0); //Not the best, but works for now
-            std::this_thread::sleep_for(std::chrono::nanoseconds(time_to_read));
-        }*/
+            std::this_thread::sleep_for(std::chrono::milliseconds(time_to_read));
+
+            //lk.unlock();
+            //cv.notify_all();
+        }
     }
     return 0;
 }
