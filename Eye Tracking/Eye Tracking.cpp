@@ -32,18 +32,27 @@ HWND hWnd;                                      // main window handle
 std::ifstream parameters;                       //to read from output of SVM
 std::string coord;                              //tmp variable
 
-double epsilon = pow(10, -3);
+double epsilon = pow(10, -7);
 std::mutex m;
 std::condition_variable cv;
 
-struct GlobalInfo {                             // for the working environment
+struct TrackerInfo {
     float old_gaze_y = 0;
     float gaze_y = 0;
     float old_gaze_x = 0;
     float gaze_x = 0;
     float head_z = 0;
+};
+struct GlobalInfo {
+    TrackerInfo tracker = {};
     bool working = true;
     bool safe = true;
+    bool scroll_down = true;
+    bool scroll_up = true;
+    bool zoom = true;
+    int lines_scroll = 40;
+    int speed_scroll = 240;
+    double zoom_factor = 1.65;
 }Info;
 
 struct SVM_param {
@@ -63,11 +72,11 @@ LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
 void url_receiver(char const* url, void* user_data);
 void gaze_point_callback(tobii_gaze_point_t const* gaze_point, void* /* user_data*/);
+void head_pose_callback(tobii_head_pose_t const* head_pose, void* user_data);
 void Parameter_parsing();
-BOOL SetZoom(float zoomFactor);
 DWORD WINAPI  tobii(_In_ LPVOID lpParameter);
 DWORD WINAPI  scroll(_In_ LPVOID lpParameter);
-//DWORD WINAPI  zoom(_In_ LPVOID lpParameter);
+DWORD WINAPI  zoom(_In_ LPVOID lpParameter);
 
 
 
@@ -89,7 +98,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
     std::thread hTobii(tobii, &Info);
     std::thread hScroll(scroll, &Info);
-    //std::thread hZoom(zoom, &Info);
+    std::thread hZoom(zoom, &Info);
 
     // Perform application initialization:
     //if (!InitInstance (hInstance, nCmdShow))
@@ -111,9 +120,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
             TranslateMessage(&msg);
             DispatchMessage(&msg);
         }
-    }
-
-    return (int) msg.wParam;//*/
+    }//*/
 
 
     MessageBox(NULL, L"Click to quit", L"Click to quit", MB_OK);
@@ -121,7 +128,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
     hTobii.join();
     hScroll.join();
-    //hZoom.join();
+    hZoom.join();
 
     return 0;
 }
@@ -212,12 +219,12 @@ DWORD WINAPI  tobii(_In_ LPVOID lpParameter)
     result = tobii_device_create(api, url, TOBII_FIELD_OF_USE_INTERACTIVE, &device);
     assert(result == TOBII_ERROR_NO_ERROR);
 
-    // Subscribe to gaze data
-    result = tobii_gaze_point_subscribe(device, gaze_point_callback, info);
-    assert(result == TOBII_ERROR_NO_ERROR);
-
     while (info->working)
     {
+        // Subscribe to gaze data
+        result = tobii_gaze_point_subscribe(device, gaze_point_callback, info);
+        assert(result == TOBII_ERROR_NO_ERROR);
+
         // Optionally block this thread until data is available.
         result = tobii_wait_for_callbacks(1, &device);
         assert(result == TOBII_ERROR_NO_ERROR || result == TOBII_ERROR_TIMED_OUT);
@@ -225,11 +232,28 @@ DWORD WINAPI  tobii(_In_ LPVOID lpParameter)
         // Process callbacks if data is available
         result = tobii_device_process_callbacks(device);
         assert(result == TOBII_ERROR_NO_ERROR);
+
+        result = tobii_gaze_point_unsubscribe(device);
+        assert(result == TOBII_ERROR_NO_ERROR);
+
+
+
+        result = tobii_head_pose_subscribe(device, head_pose_callback, info);
+        assert(result == TOBII_ERROR_NO_ERROR);
+
+        // Optionally block this thread until data is available.
+        result = tobii_wait_for_callbacks(1, &device);
+        assert(result == TOBII_ERROR_NO_ERROR || result == TOBII_ERROR_TIMED_OUT);
+
+        // Process callbacks if data is available
+        result = tobii_device_process_callbacks(device);
+        assert(result == TOBII_ERROR_NO_ERROR);
+
+        result = tobii_head_pose_unsubscribe(device);
+        assert(result == TOBII_ERROR_NO_ERROR);
     }
 
     // Cleanup
-    result = tobii_gaze_point_unsubscribe(device);
-    assert(result == TOBII_ERROR_NO_ERROR);
     result = tobii_device_destroy(device);
     assert(result == TOBII_ERROR_NO_ERROR);
     result = tobii_api_destroy(api);
@@ -246,24 +270,33 @@ void gaze_point_callback(tobii_gaze_point_t const* gaze_point, void* data)
     if (gaze_point->validity == TOBII_VALIDITY_VALID)
     {
         GlobalInfo* info = reinterpret_cast<GlobalInfo*>(data);
-        if (info->old_gaze_x == 0 && info->old_gaze_y == 0)
+        if (info->tracker.old_gaze_x == 0 && info->tracker.old_gaze_y == 0)
         {
-            info->old_gaze_x = gaze_point->position_xy[0];
-            info->gaze_x = gaze_point->position_xy[0];
-            info->old_gaze_y = gaze_point->position_xy[1];
-            info->gaze_y = gaze_point->position_xy[1];
+            info->tracker.old_gaze_x = gaze_point->position_xy[0];
+            info->tracker.gaze_x = gaze_point->position_xy[0];
+            info->tracker.old_gaze_y = gaze_point->position_xy[1];
+            info->tracker.gaze_y = gaze_point->position_xy[1];
         }
         else
         {
-            info->old_gaze_x = info->gaze_x;
-            info->gaze_x = gaze_point->position_xy[0];
-            info->old_gaze_y = info->gaze_y;
-            info->gaze_y = gaze_point->position_xy[1];
+            info->tracker.old_gaze_x = info->tracker.gaze_x;
+            info->tracker.gaze_x = gaze_point->position_xy[0];
+            info->tracker.old_gaze_y = info->tracker.gaze_y;
+            info->tracker.gaze_y = gaze_point->position_xy[1];
         }
     }
 }
 
 
+
+void head_pose_callback(tobii_head_pose_t const* head_pose, void* user_data)
+{
+    if (head_pose->position_validity == TOBII_VALIDITY_VALID)
+    {
+        GlobalInfo* info = reinterpret_cast<GlobalInfo*>(user_data);
+        info->tracker.head_z = head_pose->position_xyz[2];
+    }
+}
 
 
 void url_receiver(char const* url, void* user_data)
@@ -305,33 +338,33 @@ DWORD WINAPI  scroll(_In_ LPVOID lpParameter)
         client_up.x /= GetSystemMetrics(SM_CXSCREEN);
         client_up.y /= GetSystemMetrics(SM_CYSCREEN);
 
-        double x_down = (info->gaze_x - svm_down.mean[0]) / svm_down.std[0];
-        double y_down = (info->gaze_y - svm_down.mean[1]) / svm_down.std[1];
-        double x_up = (info->gaze_x - svm_up.mean[0]) / svm_up.std[0];
-        double y_up = (info->gaze_y - svm_up.mean[1]) / svm_up.std[1];
+        double x_down = (info->tracker.gaze_x - svm_down.mean[0]) / svm_down.std[0];
+        double y_down = (info->tracker.gaze_y - svm_down.mean[1]) / svm_down.std[1];
+        double x_up = (info->tracker.gaze_x - svm_up.mean[0]) / svm_up.std[0];
+        double y_up = (info->tracker.gaze_y - svm_up.mean[1]) / svm_up.std[1];
 
-        if (x_down * client_down.x + y_down * client_down.y + svm_down.b > 0)
+        if ((x_down * client_down.x + y_down * client_down.y + svm_down.b > 0) && (info->scroll_down))
         {
-            //std::unique_lock<std::mutex> lk(m);
-            //cv.wait(lk, [&] {return !info->safe; });
+            std::unique_lock<std::mutex> lk(m);
+            cv.wait(lk, [&] {return !info->safe; });
 
-            mouse_event(MOUSEEVENTF_WHEEL, 0, 0, -1 * line, 0); //Not the best, but works for now
-            std::this_thread::sleep_for(std::chrono::milliseconds(time_to_read));
+            mouse_event(MOUSEEVENTF_WHEEL, 0, 0, -1 * info->lines_scroll, 0); //Not the best, but works for now
+            std::this_thread::sleep_for(std::chrono::milliseconds(info->speed_scroll));
 
-            //lk.unlock();
-            //cv.notify_all();
+            lk.unlock();
+            cv.notify_all();
         }
 
-        if (x_up * client_up.x + y_up * client_up.y + svm_up.b > 0)
+        if ((x_up * client_up.x + y_up * client_up.y + svm_up.b > 0) && (info->scroll_up))
         {
-            //std::unique_lock<std::mutex> lk(m);
-            //cv.wait(lk, [&] {return !info->safe; });
+            std::unique_lock<std::mutex> lk(m);
+            cv.wait(lk, [&] {return !info->safe; });
 
-            mouse_event(MOUSEEVENTF_WHEEL, 0, 0, 1 * line, 0); //Not the best, but works for now
-            std::this_thread::sleep_for(std::chrono::milliseconds(time_to_read));
+            mouse_event(MOUSEEVENTF_WHEEL, 0, 0, info->lines_scroll, 0); //Not the best, but works for now
+            std::this_thread::sleep_for(std::chrono::milliseconds(info->speed_scroll));
 
-            //lk.unlock();
-            //cv.notify_all();
+            lk.unlock();
+            cv.notify_all();
         }
     }
     return 0;
@@ -340,23 +373,50 @@ DWORD WINAPI  scroll(_In_ LPVOID lpParameter)
 
 
 
-
-
-BOOL SetZoom(float zoomFactor)
+DWORD WINAPI  zoom(_In_ LPVOID lpParameter)
 {
-    if (zoomFactor < 1.0)
+    GlobalInfo* info = reinterpret_cast<GlobalInfo*>(lpParameter);
+    try
     {
-        return FALSE;
+        MagInitialize();
+        while (info->working)
+        {
+            std::lock_guard<std::mutex> lk(m);
+            double x = (info->tracker.head_z - svm_zoom.mean[0]) / svm_zoom.std[0];
+            if ((svm_zoom.w[0] * x + svm_zoom.b > 0) && (info->zoom))
+            {
+                info->safe = true;
+                if ((abs(info->tracker.gaze_x - info->tracker.old_gaze_x) > epsilon) && (abs(info->tracker.gaze_y - info->tracker.old_gaze_y) > epsilon))
+                {
+                    int dx = (int)((float)GetSystemMetrics(SM_CXSCREEN) * (1.0 - (1.0 / info->zoom_factor)) * info->tracker.gaze_x);
+                    int dy = (int)((float)GetSystemMetrics(SM_CYSCREEN) * (1.0 - (1.0 / info->zoom_factor)) * info->tracker.gaze_y);
+
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    MagSetFullscreenTransform(info->zoom_factor, dx, dy);
+                }
+
+            }
+            else
+            {
+                info->safe = false;
+                int dx = (int)((float)GetSystemMetrics(SM_CXSCREEN) * (1.0 - (1.0 / 1)) / 2.0);
+                int dy = (int)((float)GetSystemMetrics(SM_CYSCREEN) * (1.0 - (1.0 / 1)) / 2.0);
+
+                MagSetFullscreenTransform(1, dx, dy);
+
+            }
+            cv.notify_all();
+        }
+        MagUninitialize();
+    }
+    catch (const std::exception&)
+    {
+        exit(200);
     }
 
-    // Calculate offsets such that the center of the magnified screen content 
-    // is at the center of the screen. The offsets are relative to the 
-    // unmagnified screen content.
-    int dx = (int)((float)GetSystemMetrics(SM_CXSCREEN) * (1.0 - (1.0 / zoomFactor)) / 2.0);
-    int dy = (int)((float)GetSystemMetrics(SM_CYSCREEN) * (1.0 - (1.0 / zoomFactor)) / 2.0);
-
-    return MagSetFullscreenTransform(zoomFactor, dx, dy);
+    return 0;
 }
+
 
 
 

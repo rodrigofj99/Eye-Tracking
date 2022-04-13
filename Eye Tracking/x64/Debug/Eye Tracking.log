@@ -1,1 +1,3 @@
-﻿  Eye Tracking.vcxproj -> C:\Users\Rodrigo\Documents\KU Classes\Spring 2022\math_882\Final project\Eye Tracking\x64\Debug\Eye Tracking.exe
+﻿  Eye Tracking.cpp
+C:\Users\Rodrigo\Documents\KU Classes\Spring 2022\math_882\Final project\Eye Tracking\Eye Tracking.cpp(397,51): warning C4244: 'argument': conversion from 'double' to 'float', possible loss of data
+  Eye Tracking.vcxproj -> C:\Users\Rodrigo\Documents\KU Classes\Spring 2022\math_882\Final project\Eye Tracking\x64\Debug\Eye Tracking.exe
